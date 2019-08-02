@@ -1,5 +1,6 @@
 use libc;
 use std::io;
+use std::mem;
 
 pub mod public {
     use libc;
@@ -118,6 +119,26 @@ pub unsafe fn sendto(socket: CSocket,
                      addrlen: SockLen)
     -> CouldFail {
     libc::sendto(socket, buf, len, flags, addr, addrlen)
+}
+
+pub unsafe fn sendmultiple(socket: CSocket,
+                           buffers: &mut Vec<&mut [u8]>,
+                           flags: libc::c_int)
+    -> CouldFail {
+    let mut messages: Vec<libc::mmsghdr> = buffers.iter_mut()
+        .map(|buf| libc::mmsghdr {
+            msg_hdr: {
+                let mut message = mem::zeroed::<libc::msghdr>();
+                message.msg_iov = buf.as_mut_ptr() as *mut libc::iovec;
+                message.msg_iovlen = buf.len();
+
+                message
+            },
+            msg_len: 0,
+        }).collect();
+
+    libc::sendmmsg(socket, &mut messages[0] as *mut libc::mmsghdr,
+                   messages.len() as libc::c_uint, flags) as isize
 }
 
 pub unsafe fn recvfrom(socket: CSocket,

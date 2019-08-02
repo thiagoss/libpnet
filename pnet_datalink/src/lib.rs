@@ -203,6 +203,9 @@ pub trait DataLinkSender: Send {
     /// `None` should be passed.
     #[inline]
     fn send_to(&mut self, packet: &[u8], dst: Option<NetworkInterface>) -> Option<io::Result<()>>;
+
+    #[inline]
+    fn send_multiple_to(&mut self, packet: &mut Vec<&mut[u8]>, _dst: Option<NetworkInterface>) -> Option<io::Result<()>>;
 }
 
 /// Structure for receiving packets at the data link layer. Should be constructed using
@@ -233,7 +236,7 @@ impl NetworkInterface {
     pub fn mac_address(&self) -> MacAddr {
         self.mac.unwrap()
     }
-    
+
     pub fn is_up(&self) -> bool {
         self.flags & (pnet_sys::IFF_UP as u32) != 0
     }
@@ -268,7 +271,7 @@ impl ::std::fmt::Display for NetworkInterface {
                 "{:X}<{}>",
                 self.flags,
                 rets.iter()
-                    .zip(FLAGS.iter()) 
+                    .zip(FLAGS.iter())
                     .filter(|&(ret, _)| ret == &true)
                     .map(|(_, name)| name.to_string())
                     .collect::<Vec<String>>()

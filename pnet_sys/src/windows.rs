@@ -94,6 +94,14 @@ pub unsafe fn sendto(socket: CSocket,
     ws2_32::sendto(socket, buf, len, flags, to, tolen)
 }
 
+
+pub unsafe fn sendmultiple(socket: CSocket,
+                           buffers: &mut Vec<&mut [u8]>,
+                           flags: libc::c_int)
+    -> CouldFail {
+    return -1
+}
+
 pub unsafe fn recvfrom(socket: CSocket,
                        buf: MutBuf,
                        len: BufLen,

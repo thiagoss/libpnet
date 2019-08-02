@@ -62,6 +62,25 @@ pub fn send_to(socket: CSocket,
     }
 }
 
+pub fn send_multiple(socket: CSocket,
+                     buffers: &mut Vec<&mut [u8]>)
+    -> io::Result<usize> {
+
+    let send_len = imp::retry(&mut || unsafe {
+        imp::sendmultiple(
+            socket,
+            buffers,
+            0,
+        )
+    });
+
+    if send_len < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(send_len as usize)
+    }
+}
+
 pub fn recv_from(socket: CSocket,
                  buffer: &mut [u8],
                  caddr: *mut SockAddrStorage)
@@ -99,7 +118,7 @@ pub fn set_socket_receive_timeout(socket: CSocket, t: Duration)
     };
 
     if r < 0 {
-        Err(io::Error::last_os_error()) 
+        Err(io::Error::last_os_error())
     } else if r > 0 {
         Err(io::Error::new(io::ErrorKind::Other, format!("Unknown return value from getsockopt(): {}", r)))
     } else {
@@ -120,9 +139,9 @@ pub fn get_socket_receive_timeout(socket: CSocket)
         )
     };
     assert_eq!(len, mem::size_of::<libc::timeval>() as SockLen, "getsockopt did not set size of return value");
-    
+
     if r < 0 {
-        Err(io::Error::last_os_error()) 
+        Err(io::Error::last_os_error())
     } else if r > 0 {
         Err(io::Error::new(io::ErrorKind::Other, format!("Unknown return value from getsockopt(): {}", r)))
     } else {

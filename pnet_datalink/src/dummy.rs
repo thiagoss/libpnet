@@ -123,6 +123,16 @@ impl DataLinkSender for MockDataLinkSender {
         self.sender.send(buffer.into_boxed_slice()).unwrap_or(());
         Some(Ok(()))
     }
+
+    fn send_multiple_to(&mut self,
+                        packets: &mut Vec<&mut[u8]>,
+                        _dst: Option<NetworkInterface>)
+        -> Option<io::Result<()>> {
+        packets.iter().for_each(|packet| {
+            self.send_to(packet, None); // TODO this should be "dst"
+        });
+        Some(Ok(()))
+    }
 }
 
 struct MockDataLinkReceiver {
