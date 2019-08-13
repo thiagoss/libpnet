@@ -62,6 +62,9 @@ pub struct Config {
 
     /// Specifies packet fanout option, if desired. Defaults to None.
     pub fanout: Option<super::FanoutOption>,
+
+    /// The number of read buffers to use. Defaults to 1
+    pub read_buffer_count: usize,
 }
 
 impl<'a> From<&'a super::Config> for Config {
@@ -73,6 +76,7 @@ impl<'a> From<&'a super::Config> for Config {
             read_timeout: config.read_timeout,
             write_timeout: config.write_timeout,
             fanout: config.linux_fanout,
+            read_buffer_count: config.read_buffer_count,
         }
     }
 }
@@ -86,6 +90,7 @@ impl Default for Config {
             write_timeout: None,
             channel_type: super::ChannelType::Layer2,
             fanout: None,
+            read_buffer_count: 1,
         }
     }
 }
@@ -202,10 +207,14 @@ pub fn channel(network_interface: &NetworkInterface, config: Config) -> io::Resu
             .write_timeout
             .map(|to| pnet_sys::duration_to_timespec(to)),
     });
+    let mut read_buffers = Vec::with_capacity(config.read_buffer_count);
+    for _ in 0..config.read_buffer_count {
+        read_buffers.push(vec![0; config.read_buffer_size])
+    }
     let receiver = Box::new(DataLinkReceiverImpl {
         socket: fd.clone(),
         fd_set: unsafe { mem::zeroed() },
-        read_buffer: vec![0; config.read_buffer_size],
+        read_buffers,
         _channel_type: config.channel_type,
         timeout: config
             .read_timeout
@@ -356,7 +365,7 @@ impl DataLinkSender for DataLinkSenderImpl {
 struct DataLinkReceiverImpl {
     socket: Arc<pnet_sys::FileDesc>,
     fd_set: libc::fd_set,
-    read_buffer: Vec<u8>,
+    read_buffers: Vec<Vec<u8>>,
     _channel_type: super::ChannelType,
     timeout: Option<libc::timespec>,
 }
@@ -386,9 +395,50 @@ impl DataLinkReceiver for DataLinkReceiverImpl {
         } else if ret == 0 {
             Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out"))
         } else {
-            let res = pnet_sys::recv_from(self.socket.fd, &mut self.read_buffer, &mut caddr);
+            let res = pnet_sys::recv_from(self.socket.fd, &mut self.read_buffers[0], &mut caddr);
             match res {
-                Ok(len) => Ok(&self.read_buffer[0..len]),
+                Ok(len) => Ok(&self.read_buffers[0][0..len]),
+                Err(e) => Err(e),
+            }
+        }
+    }
+
+    fn next_many(&mut self, max: usize) -> io::Result<Vec<&[u8]>> {
+        let mut caddr: libc::sockaddr_storage = unsafe { mem::zeroed() };
+        unsafe {
+            libc::FD_ZERO(&mut self.fd_set as *mut libc::fd_set);
+            libc::FD_SET(self.socket.fd, &mut self.fd_set as *mut libc::fd_set);
+        }
+        let ret = unsafe {
+            libc::pselect(
+                self.socket.fd + 1,
+                &mut self.fd_set as *mut libc::fd_set,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                self.timeout
+                    .as_ref()
+                    .map(|to| to as *const libc::timespec)
+                    .unwrap_or(ptr::null()),
+                ptr::null(),
+            )
+        };
+        if ret == -1 {
+            Err(io::Error::last_os_error())
+        } else if ret == 0 {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "Timed out"))
+        } else {
+            let buffers = self.read_buffers.iter_mut()
+                .map(|x| x.as_mut_slice())
+                .collect();
+            let res = pnet_sys::recv_many_from(self.socket.fd, buffers, &mut caddr);
+            match res {
+                Ok(data_lengths) => {
+                    let mut read_vectors = Vec::with_capacity(data_lengths.len());
+                    for (pos, length) in data_lengths.iter().enumerate() {
+                        read_vectors.push(&self.read_buffers[pos][0..*length]);
+                    }
+                    Ok(read_vectors)
+                },
                 Err(e) => Err(e),
             }
         }

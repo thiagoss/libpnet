@@ -148,6 +148,9 @@ pub struct Config {
     pub bpf_fd_attempts: usize,
 
     pub linux_fanout: Option<FanoutOption>,
+
+    /// Number of read buffers to be used. Defaults to 1.
+    pub read_buffer_count: usize,
 }
 
 impl Default for Config {
@@ -160,6 +163,7 @@ impl Default for Config {
             channel_type: ChannelType::Layer2,
             bpf_fd_attempts: 1000,
             linux_fanout: None,
+            read_buffer_count: 1,
         }
     }
 }
@@ -214,6 +218,9 @@ pub trait DataLinkReceiver: Send {
     #[inline]
     /// Get the next ethernet frame in the channel.
     fn next(&mut self) -> io::Result<&[u8]>;
+
+    /// Get the ethernet frames in the channel.
+    fn next_many(&mut self, max: usize) -> io::Result<Vec<&[u8]>>;
 }
 
 /// Represents a network interface and its associated addresses.

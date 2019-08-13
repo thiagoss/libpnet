@@ -1,5 +1,5 @@
 use libc;
-use std::io;
+use std::{io, ptr};
 use std::mem;
 
 pub mod public {
@@ -151,6 +151,41 @@ pub unsafe fn recvfrom(socket: CSocket,
     libc::recvfrom(socket, buf, len, flags, addr, addrlen)
 }
 
+pub unsafe fn recvmultiplefrom(socket: CSocket,
+                               bufs: Vec<MutBuf>,
+                               lens: Vec<BufLen>,
+                               flags: libc::c_int,
+                               addr: *mut SockAddr,
+                               addrlen: *mut SockLen)
+                               -> Result<Vec<usize>, CouldFail> {
+    let mut iovecs: Vec<libc::iovec> = bufs.iter().zip(lens.iter())
+        .map(|(buf, buflen)| {
+            let mut iovec = mem::zeroed::<libc::iovec>();
+            iovec.iov_base = *buf;
+            iovec.iov_len = *buflen;
+            iovec
+        }).collect();
+
+    let mut messages: Vec<libc::mmsghdr> = iovecs.iter_mut()
+        .map(|msg| {
+            let mut message = mem::zeroed::<libc::msghdr>();
+            message.msg_iov = msg as *mut _;
+            message.msg_iovlen = 1;
+
+            libc::mmsghdr {
+                msg_hdr: message,
+                msg_len: 0
+            }
+        }).collect();
+
+    let res = libc::recvmmsg(socket, messages.as_mut_ptr(), messages.len() as u32,
+                   flags, ptr::null_mut()) as isize;
+    if res < 0 {
+        return Err(res);
+    }
+
+    return Ok(messages[0..res as usize].iter().map(|h| h.msg_len as usize).collect())
+}
 
 #[inline]
 pub fn retry<F>(f: &mut F) -> libc::ssize_t
@@ -160,6 +195,23 @@ pub fn retry<F>(f: &mut F) -> libc::ssize_t
         let ret = f();
         if ret != -1 || errno() as isize != libc::EINTR as isize {
             return ret;
+        }
+    }
+}
+
+#[inline]
+pub fn retry_multiple<F>(f: &mut F) -> Result<Vec<usize>, libc::ssize_t>
+    where F: FnMut() -> Result<Vec<usize>, libc::ssize_t>
+{
+    loop {
+        let ret = f();
+        match ret {
+            Ok(x) => return Ok(x),
+            Err(os_ret) => {
+                if os_ret != -1 || errno() as isize != libc::EINTR as isize {
+                    return Err(os_ret);
+                }
+            }
         }
     }
 }

@@ -104,6 +104,32 @@ pub fn recv_from(socket: CSocket,
     }
 }
 
+pub fn recv_many_from(socket: CSocket,
+                      buffers: Vec<&mut [u8]>,
+                      caddr: *mut SockAddrStorage)
+                      -> io::Result<Vec<usize>> {
+    let mut caddrlen = mem::size_of::<SockAddrStorage>() as SockLen;
+    let result = imp::retry_multiple(&mut || unsafe {
+        let mutbufs = buffers.iter()
+            .map(|x| x.as_ptr() as MutBuf).collect();
+        let lens = buffers.iter()
+            .map(|x| x.len() as BufLen).collect();
+        imp::recvmultiplefrom(
+            socket,
+            mutbufs,
+            lens,
+            0,
+            caddr as *mut SockAddr,
+            &mut caddrlen
+        )
+    });
+
+    match result {
+        Ok(lengths) => Ok(lengths),
+        Err(_) => Err(io::Error::last_os_error())
+    }
+}
+
 
 /// Set a timeout for receiving from the socket.
 #[cfg(unix)]
